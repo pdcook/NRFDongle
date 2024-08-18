@@ -48,11 +48,11 @@
 
 // A packet is a struct with a const generic uint8_t size array of uint8_t's
 template <uint8_t packet_size> struct Packet {
-  uint8_t data[size];
+  uint8_t data[packet_size];
 };
 
-// pairing address
-const uint64_t _PAIR_ADDRESS_ = 0x000000000000;
+// pairing address, CANNOT be 0x0000000000000000
+const uint64_t _PAIR_ADDRESS_ = 0x0A0A0A0A0A0A0A0A;
 
 template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
     public:
@@ -73,7 +73,13 @@ template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
         void end();
         bool unpair();
         bool is_paired();
+        bool is_enabled();
         uint64_t get_address();
+        uint64_t get_unique_id();
+        void set_unique_id(uint64_t unique_id);
+
+        // method for whether or not there is data in the buffer
+        bool has_data();
 
         Radio &get_radio();
 
@@ -270,9 +276,29 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
     return this->paired;
 }
 
+// Is Enabled
+template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, max_packets>::is_enabled() {
+    return this->enabled;
+}
+
 // Get Address
 template <uint8_t packet_size, uint8_t max_packets> uint64_t NRFDongle<packet_size, max_packets>::get_address() {
     return this->address;
+}
+
+// Get Unique ID
+template <uint8_t packet_size, uint8_t max_packets> uint64_t NRFDongle<packet_size, max_packets>::get_unique_id() {
+    return this->unique_id;
+}
+
+// Set Unique ID
+template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, max_packets>::set_unique_id(uint64_t unique_id) {
+    this->unique_id = unique_id;
+}
+
+// Has Data
+template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, max_packets>::has_data() {
+    return !this->buffer.isEmpty();
 }
 
 // Get Radio
