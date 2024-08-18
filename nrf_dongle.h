@@ -58,6 +58,9 @@ template <uint8_t packet_size> struct Packet {
 // pairing address, CANNOT be 0x0000000000000000
 const uint64_t _PAIR_ADDRESS_ = 0x0A0A0A0A0A0A0A0A;
 
+// pairing channel, not yet implemented
+const uint8_t _PAIR_CHANNEL_ = 0;
+
 // pairing packet, sends the unique_id and ping millis
 typedef Packet<sizeof(uint64_t) + sizeof(uint32_t)> PairingPacket;
 
@@ -135,6 +138,20 @@ template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
 
 // Constructor
 template <uint8_t packet_size, uint8_t max_packets> NRFDongle<packet_size, max_packets>::NRFDongle(Radio &radio, uint64_t unique_id, uint8_t channel, uint16_t ping_interval_millis, uint32_t pair_timeout_millis, uint8_t data_rate, uint8_t power_level) : radio(radio) {
+
+    // US law restricts the use of the 2.4 GHz band to channels 1-11
+    // except for low-power devices, which can additionally use channels
+    // 12-13; however, just beyond channel 13 is a
+    // HIGHLY restricted band, so we restrict ourselves to 1-11,
+    // which corresponds to values of 0-10 here.
+    // Channel 1 (value 0) is reserved for pairing
+    // (not yet implemented)
+    // https://en.wikipedia.org/wiki/List_of_WLAN_channels
+
+    // if channel isn't in the range 1-10, set it to 1
+    if (channel < 1 || channel > 10) {
+        channel = 1;
+    }
 
     // if this is the host, the unique_id will be the address
     // if this is the dongle, the unique_id is unused

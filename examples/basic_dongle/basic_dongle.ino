@@ -27,7 +27,7 @@
     uint8_t power_level = RF24_PA_HIGH;
 #endif // NRF24
 
-uint8_t channel = 90;
+uint8_t channel = 1;
 uint32_t pair_timeout_millis = 120000; // 2 minutes
 uint16_t ping_interval_millis = 1000; // 1 second
 
