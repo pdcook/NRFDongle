@@ -139,17 +139,19 @@ template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
 // Constructor
 template <uint8_t packet_size, uint8_t max_packets> NRFDongle<packet_size, max_packets>::NRFDongle(Radio &radio, uint64_t unique_id, uint8_t channel, uint16_t ping_interval_millis, uint32_t pair_timeout_millis, uint8_t data_rate, uint8_t power_level) : radio(radio) {
 
-    // US law restricts the use of the 2.4 GHz band to channels 1-11
-    // except for low-power devices, which can additionally use channels
-    // 12-13; however, just beyond channel 13 is a
-    // HIGHLY restricted band, so we restrict ourselves to 1-11,
-    // which corresponds to values of 0-10 here.
-    // Channel 1 (value 0) is reserved for pairing
-    // (not yet implemented)
+    // US law restricts the use of the 2.4 GHz band
+    // specifically, frequencies between 2.4-2.473 GHz
+    // are generally allowed.
+    // This corresponds to nRF channels 0-73
+    // (https://github.com/mysensors/MySensors/blob/ee91d5da38a1435cb4b55476447e763f52540c3c/MyConfig.h#L455)
+    // 0 -> 2400 MHz
+    // 1 -> 2401 MHz
+    // n -> 2400 + n MHz
+    // Channel 0 is reserved for pairing (not yet implemented)
     // https://en.wikipedia.org/wiki/List_of_WLAN_channels
 
-    // if channel isn't in the range 1-10, set it to 1
-    if (channel < 1 || channel > 10) {
+    // if channel isn't in the range 1-73, set it to 1
+    if (channel < 1 || channel > 73) {
         channel = 1;
     }
 
