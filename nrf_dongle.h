@@ -338,6 +338,10 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
         this->radio.startListening();
     #endif // NRF_DONGLE
 
+    // reset timers
+    this->ping_timer = 0;
+    this->pair_timer = 0;
+
     return true;
 }
 
