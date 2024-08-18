@@ -46,24 +46,43 @@
 // https://github.com/rlogiacco/CircularBuffer/
 #include <CircularBuffer.hpp>
 
+// https://github.com/pfeerick/elapsedMillis
+#include <elapsedMillis.h>
+
 // A packet is a struct with a const generic uint8_t size array of uint8_t's
 template <uint8_t packet_size> struct Packet {
-  uint8_t data[packet_size];
+    bool ping;
+    uint8_t data[packet_size];
 };
 
 // pairing address, CANNOT be 0x0000000000000000
 const uint64_t _PAIR_ADDRESS_ = 0x0A0A0A0A0A0A0A0A;
 
+// pairing packet, sends the unique_id and ping millis
+typedef Packet<sizeof(uint64_t) + sizeof(uint32_t)> PairingPacket;
+
+union PairingPacketUnion {
+    PairingPacket packet;
+    struct {
+        uint64_t unique_id;
+        uint16_t ping_interval_millis;
+    };
+};
+
 template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
     public:
         // take in a reference to the radio, a unique identifier for this radio
         // the channel,
+        // the ping interval in milliseconds,
+        // pairing timeout in milliseconds,
         // and settings for the radio:
         //     data rate, power level
         NRFDongle(
                     Radio &radio,
-                    uint64_t unique_id,
+                    uint64_t unique_id, // unused for dongle
                     uint8_t channel,
+                    uint16_t ping_interval_millis, // unused for dongle
+                    uint32_t pair_timeout_millis,
                     uint8_t data_rate,
                     uint8_t power_level
                 );
@@ -85,6 +104,8 @@ template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
 
         #ifdef NRF_HOST
             bool send(Packet<packet_size> packet, bool send_now = false);
+
+            bool ping();
         #endif // NRF_HOST
 
         #ifdef NRF_DONGLE
@@ -101,14 +122,19 @@ template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
         uint8_t data_rate;
         uint8_t power_level;
         CircularBuffer<Packet<packet_size>, max_packets> buffer;
+        elapsedMillis ping_timer;
+        elapsedMillis pair_timer;
+        uint16_t ping_interval_millis;
+        uint32_t pair_timeout_millis;
 
         bool try_pair();
+        uint8_t get_ping_packet_size();
 };
 
 // Implementation
 
 // Constructor
-template <uint8_t packet_size, uint8_t max_packets> NRFDongle<packet_size, max_packets>::NRFDongle(Radio &radio, uint64_t unique_id, uint8_t channel, uint8_t data_rate, uint8_t power_level) : radio(radio) {
+template <uint8_t packet_size, uint8_t max_packets> NRFDongle<packet_size, max_packets>::NRFDongle(Radio &radio, uint64_t unique_id, uint8_t channel, uint16_t ping_interval_millis, uint32_t pair_timeout_millis, uint8_t data_rate, uint8_t power_level) : radio(radio) {
 
     // if this is the host, the unique_id will be the address
     // if this is the dongle, the unique_id is unused
@@ -126,6 +152,12 @@ template <uint8_t packet_size, uint8_t max_packets> NRFDongle<packet_size, max_p
 
     // set the channel
     this->channel = channel;
+
+    // set the ping interval
+    this->ping_interval_millis = ping_interval_millis;
+
+    // set the pair timeout
+    this->pair_timeout_millis = pair_timeout_millis;
 
     // save radio settings
     this->data_rate = data_rate;
@@ -152,9 +184,9 @@ template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, 
     this->radio.setDataRate(this->data_rate);
     this->radio.setPALevel(this->power_level);
 
-    // set transmission size to the size of the address during pairing
-    // later, we will set the payload size to the size of the packet
-    this->radio.setPayloadSize(sizeof(uint64_t));
+    // set transmission size to the size of the pairing packet during pairing
+    // later, we will set the payload size to the size of the data packet
+    this->radio.setPayloadSize(sizeof(PairingPacket));
 
     // host opens writing pipe
     // dongle opens reading pipe
@@ -172,6 +204,10 @@ template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, 
     #ifdef NRF_DONGLE
         this->radio.startListening();
     #endif // NRF_DONGLE
+
+    // start timers
+    this->ping_timer = 0;
+    this->pair_timer = 0;
 }
 
 // Update
@@ -186,10 +222,17 @@ template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, 
         // if we are not paired, try to pair
         if (!this->paired) {
             this->paired = this->try_pair();
+
+            // if we are not paired, and the pair timeout has exceeded
+            // then power down the radio
+            if (!this->paired && this->pair_timer > this->pair_timeout_millis) {
+                this->end();
+            }
         }
 
-        // if we are paired, we can send packets
+        // if we are paired, we can send packets and ping
         else {
+
             // if we have packets to send
             if (!this->buffer.isEmpty()) {
                 // send the packet, and pop it
@@ -199,7 +242,20 @@ template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, 
                 if (!received) {
                     this->unpair();
                     this->buffer.clear();
+                } else {
+                    // reset the ping timer as there's no need to ping
+                    // if data was sent and received
+                    this->ping_timer = 0;
                 }
+
+            }
+
+            // try to ping
+            // if data was just sent, then this will be skipped safely
+            if (!this->ping()) {
+                // if the ping was sent and not acknowledged, unpair
+                this->unpair();
+                this->buffer.clear();
             }
         }
     #endif // NRF_HOST
@@ -209,19 +265,33 @@ template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, 
         // if we are not paired, try to pair
         if (!this->paired) {
             this->paired = this->try_pair();
-        }
 
-        // if we are paired, we can receive packets
-        else {
+            // if we are not paired, and the pair timeout has exceeded
+            // then power down the radio
+            if (!this->paired && this->pair_timer > this->pair_timeout_millis) {
+                this->end();
+            }
+        } else if (this->ping_timer > 2 * this->ping_interval_millis) {
+            // if we are paired, but the ping timer has exceeded
+            // twice ping_interval_millis, unpair
+            this->unpair();
+        } else if (this->radio.available()) {
+            // if we are paired, we can receive packets
             // if we have a packet
-            if (this->radio.available()) {
-                // create a packet
-                Packet<packet_size> packet;
-                // read the packet
-                this->radio.read(&packet, sizeof(Packet<packet_size>));
-                // push the packet
+
+            // create a packet
+            Packet<packet_size> packet;
+            // read the packet
+            this->radio.read(&packet, sizeof(Packet<packet_size>));
+
+            // push the packet if it is not a ping packet
+            if (!packet.ping) {
                 this->buffer.push(packet);
             }
+
+            // if we have successfully received a packet
+            // reset the ping timer
+            this->ping_timer = 0;
         }
     #endif // NRF_DONGLE
 }
@@ -247,9 +317,9 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
     this->paired = false;
     this->address = _PAIR_ADDRESS_;
 
-    // set the payload size to the size of the address during pairing
-    // later, we will set the payload size to the size of the packet
-    this->radio.setPayloadSize(sizeof(uint64_t));
+    // set the payload size to the size of the pairing packet during pairing
+    // later, we will set the payload size to the size of the data packet
+    this->radio.setPayloadSize(sizeof(PairingPacket));
 
     // host opens writing pipe
     // dongle opens reading pipe
@@ -320,7 +390,13 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
     // if we are the host, we send our unique_id
     // if the message is market as received, we are paired
     #ifdef NRF_HOST
-        bool report = this->radio.write(&this->unique_id, sizeof(uint64_t));
+
+        // create a pairing packet
+        PairingPacketUnion pairing_packet;
+        pairing_packet.unique_id = this->unique_id;
+        pairing_packet.ping_interval_millis = this->ping_interval_millis;
+
+        bool report = this->radio.write(&pairing_packet.packet, sizeof(PairingPacket));
 
         // if the message was received, we are paired
         // and we need to switch our address and payload size
@@ -328,6 +404,8 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
         if (report) {
             this->paired = true;
             this->address = this->unique_id;
+            this->pair_timer = 0;
+            this->ping_timer = 0;
             this->radio.openWritingPipe(this->address);
             this->radio.setPayloadSize(sizeof(Packet<packet_size>));
         }
@@ -339,13 +417,20 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
     #ifdef NRF_DONGLE
         if (this->radio.available()) {
             uint8_t size = this->radio.getPayloadSize();
-            if (size == sizeof(uint64_t)) {
-                uint64_t unique_id;
-                this->radio.read(&unique_id, sizeof(uint64_t));
+            // check if the size is the size of the pairing packet
+            if (size == sizeof(PairingPacket)) {
+                // read the packet
+                PairingPacketUnion pairing_packet;
+                this->radio.read(&pairing_packet.packet, sizeof(PairingPacket));
+                uint64_t unique_id = pairing_packet.unique_id;
+                uint16_t ping_interval_millis = pairing_packet.ping_interval_millis;
                 this->address = unique_id;
+                this->ping_interval_millis = ping_interval_millis;
                 this->radio.openReadingPipe(1, this->address);
                 this->radio.setPayloadSize(sizeof(Packet<packet_size>));
                 this->paired = true;
+                this->pair_timer = 0;
+                this->ping_timer = 0;
                 return true;
             }
         }
@@ -372,7 +457,47 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
 
         // if we are sending now, send the packet
         bool report = this->radio.write(&packet, sizeof(Packet<packet_size>));
+
+        // if the packet was received, reset the ping timer
+        if (report) {
+            this->ping_timer = 0;
+        }
+
         return report;
+    }
+#endif // NRF_HOST
+
+// Ping
+#ifdef NRF_HOST
+    template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, max_packets>::ping() {
+        // returns true if ping was sent and acknowledged
+        // or if there is no need to ping
+        // returns false if the ping was sent but not acknowledged
+        // therefore signaling that the pair is broken
+
+        if (!this->enabled){
+            return true;
+        }
+
+        if (!this->paired){
+            return true;
+        }
+
+        if (this->ping_timer > this->ping_interval_millis) {
+            this->ping_timer = 0;
+
+            // create a ping packet
+
+            Packet<packet_size> ping_packet;
+            ping_packet.ping = true;
+
+
+            bool report = this->radio.write(&ping_packet, sizeof(Packet<packet_size>));
+
+            return report;
+        }
+
+        return true;
     }
 #endif // NRF_HOST
 
