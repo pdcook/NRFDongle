@@ -31,14 +31,12 @@
     uint8_t power_level = RF24_PA_HIGH;
 #endif // NRF24
 
-uint8_t channel = 1;
 uint32_t pair_timeout_millis = 120000; // 2 minutes
 uint16_t ping_interval_millis = 2000; // 2 seconds
 
 // create a dongle object by providing
 // the radio object
 // a unique device id
-// the channel
 // the ping interval in milliseconds
 // the pair timeout in milliseconds
 // the data rate
@@ -46,8 +44,10 @@ uint16_t ping_interval_millis = 2000; // 2 seconds
 // as well as two consts for the packet size in bytes
 // and buffer size in elements
 
+// the channel will be determined by the device id
+
 // for this example, 4 bytes for a float, with a buffer of 2 elements
-NRFDongle<4, 2> dongle(radio, device_id, channel, ping_interval_millis, pair_timeout_millis, data_rate, power_level);
+NRFDongle<4, 2> dongle(radio, device_id, ping_interval_millis, pair_timeout_millis, data_rate, power_level);
 
 // timer so that transmission is not too frequent,
 // but we can still update the radio every loop
@@ -140,6 +140,7 @@ void loop() {
     // get some data on the dongle
     bool enabled = dongle.is_enabled();
     bool paired = dongle.is_paired();
+    uint8_t channel = dongle.get_channel();
     uint64_t address = dongle.get_address();
 
     if (!enabled) {
@@ -163,6 +164,8 @@ void loop() {
     // print the information
     Serial.print("[HOST] Paired: ");
     Serial.print(paired);
+    Serial.print(", Channel: ");
+    Serial.print(channel);
     Serial.print(", Address: ");
     Uint64Bytes ub;
     ub.u = address;
