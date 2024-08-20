@@ -77,7 +77,7 @@ template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
     public:
         // take in a reference to the radio, a unique identifier for this radio
         // the ping interval in milliseconds,
-        // pairing timeout in milliseconds,
+        // pairing timeout in milliseconds (0 for no timeout),
         // and settings for the radio:
         //     data rate, power level
         NRFDongle(
@@ -246,7 +246,8 @@ template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, 
 
             // if we are not paired, and the pair timeout has exceeded
             // then power down the radio
-            if (!this->paired && this->pair_timer > this->pair_timeout_millis) {
+            // unless the timeout is disabled (pair_timeout_millis = 0)
+            if (this->pair_timeout_millis > 0 && !this->paired && this->pair_timer > this->pair_timeout_millis) {
                 this->end();
             }
         }
@@ -289,7 +290,8 @@ template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, 
 
             // if we are not paired, and the pair timeout has exceeded
             // then power down the radio
-            if (!this->paired && this->pair_timer > this->pair_timeout_millis) {
+            // unless the timeout is disabled (pair_timeout_millis = 0)
+            if (this->pair_timeout_millis > 0 && !this->paired && this->pair_timer > this->pair_timeout_millis) {
                 this->end();
             }
         } else if (this->ping_timer > 2 * this->ping_interval_millis) {
