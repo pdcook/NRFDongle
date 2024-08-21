@@ -29,6 +29,8 @@
 
 uint32_t pair_timeout_millis = 120000; // 2 minutes
 uint16_t ping_interval_millis = 1000; // 1 second
+uint8_t retry_delay = 5; // delay is (x + 1) * 250us, default is 1.5ms
+uint8_t retry_count = 15; // 15 retries
 
 // create a dongle object by providing
 // the radio object
@@ -37,13 +39,15 @@ uint16_t ping_interval_millis = 1000; // 1 second
 // the pair timeout in milliseconds
 // the data rate
 // the power level
+// the retry delay
+// the retry count
 // as well as two consts for the packet size in bytes
 // and buffer size in elements
 
 // channel will be specified by the host
 
 // for this example, 4 bytes for a float, with a buffer of 2 elements
-NRFDongle<4, 2> dongle(radio, 0, ping_interval_millis, pair_timeout_millis, data_rate, power_level);
+NRFDongle<4, 2> dongle(radio, 0, ping_interval_millis, pair_timeout_millis, data_rate, power_level, retry_delay, retry_count);
 
 // timer so that transmission is not too frequent,
 // but we can still update the radio every loop

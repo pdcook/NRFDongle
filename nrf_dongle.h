@@ -79,14 +79,18 @@ template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
         // the ping interval in milliseconds,
         // pairing timeout in milliseconds (0 for no timeout),
         // and settings for the radio:
-        //     data rate, power level
+        //     data rate, power level,
+        //     retry delay (x+1)*250us [x = 0-15]
+        //     number of retries [0-15]
         NRFDongle(
                     Radio &radio,
                     uint64_t unique_id, // unused for dongle
                     uint16_t ping_interval_millis, // unused for dongle
                     uint32_t pair_timeout_millis,
                     uint8_t data_rate,
-                    uint8_t power_level
+                    uint8_t power_level,
+                    uint8_t retry_delay = 5, // (5+1)*250us = 1.5ms
+                    uint8_t retry_count = 15
                 );
 
         void begin();
@@ -124,6 +128,8 @@ template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
         uint8_t channel;
         uint8_t data_rate;
         uint8_t power_level;
+        uint8_t retry_delay;
+        uint8_t retry_count;
         CircularBuffer<Packet<packet_size>, max_packets> buffer;
         elapsedMillis ping_timer;
         elapsedMillis pair_timer;
@@ -137,7 +143,7 @@ template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
 // Implementation
 
 // Constructor
-template <uint8_t packet_size, uint8_t max_packets> NRFDongle<packet_size, max_packets>::NRFDongle(Radio &radio, uint64_t unique_id, uint16_t ping_interval_millis, uint32_t pair_timeout_millis, uint8_t data_rate, uint8_t power_level) : radio(radio) {
+template <uint8_t packet_size, uint8_t max_packets> NRFDongle<packet_size, max_packets>::NRFDongle(Radio &radio, uint64_t unique_id, uint16_t ping_interval_millis, uint32_t pair_timeout_millis, uint8_t data_rate, uint8_t power_level, uint8_t retry_delay, uint8_t retry_count) : radio(radio) {
 
     // US law restricts the use of the 2.4 GHz band
     // specifically, frequencies between 2.4-2.473 GHz
@@ -182,6 +188,8 @@ template <uint8_t packet_size, uint8_t max_packets> NRFDongle<packet_size, max_p
     // save radio settings
     this->data_rate = data_rate;
     this->power_level = power_level;
+    this->retry_delay = retry_delay;
+    this->retry_count = retry_count;
 }
 
 // Begin
@@ -204,6 +212,7 @@ template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, 
     // apply settings
     this->radio.setDataRate(this->data_rate);
     this->radio.setPALevel(this->power_level);
+    this->radio.setRetries(this->retry_delay, this->retry_count);
 
     // set transmission size to the size of the pairing packet during pairing
     // later, we will set the payload size to the size of the data packet
