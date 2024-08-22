@@ -36,6 +36,13 @@ uint16_t ping_interval_millis = 2000; // 2 seconds
 uint8_t retry_delay = 5; // delay is (x + 1) * 250us, default is 1.5ms
 uint8_t retry_count = 15; // 15 retries
 
+// timer so that transmission is not too frequent,
+// but we can still update the radio every loop
+elapsedMillis timer;
+
+// data to send will be a float that is incremented
+float data = 0.0;
+
 // create a dongle object by providing
 // the radio object
 // a unique device id
@@ -50,44 +57,8 @@ uint8_t retry_count = 15; // 15 retries
 
 // the channel will be determined by the device id
 
-// for this example, 4 bytes for a float, with a buffer of 2 elements
-NRFDongle<4, 2> dongle(radio, device_id, ping_interval_millis, pair_timeout_millis, data_rate, power_level, retry_delay, retry_count);
-
-// timer so that transmission is not too frequent,
-// but we can still update the radio every loop
-elapsedMillis timer;
-
-// data to send will be a float that is incremented
-float data = 0.0;
-
-// union for converting between float and bytes
-union FloatBytes {
-    float f;
-    uint8_t bytes[4];
-};
-
-// function for creating a packet from a float
-void create_packet(float f, Packet<4>& packet) {
-    FloatBytes fb;
-    fb.f = f;
-
-    packet.data[0] = fb.bytes[0];
-    packet.data[1] = fb.bytes[1];
-    packet.data[2] = fb.bytes[2];
-    packet.data[3] = fb.bytes[3];
-}
-
-// function for extracting a float from a packet
-float extract_packet(Packet<4>& packet) {
-    FloatBytes fb;
-
-    fb.bytes[0] = packet.data[0];
-    fb.bytes[1] = packet.data[1];
-    fb.bytes[2] = packet.data[2];
-    fb.bytes[3] = packet.data[3];
-
-    return fb.f;
-}
+// for this example, the data is a float, with a buffer of 2 elements
+NRFDongle<float, 2> dongle(radio, device_id, ping_interval_millis, pair_timeout_millis, data_rate, power_level, retry_delay, retry_count);
 
 // union for converting between uint64_t and two uint32_t
 // since Arduino's Serial.print does not support printing uint64_t
@@ -155,10 +126,7 @@ void loop() {
     // try to send some data by adding it to the buffer,
     // not sending it immediately
 
-    Packet<4> packet;
-    create_packet(data, packet);
-
-    bool success = dongle.send(packet, false);
+    bool success = dongle.send(data, false);
 
     if (success) {
         // increment the data if it was successfully added to the buffer
@@ -176,7 +144,7 @@ void loop() {
     Serial.print(ub.bytes[1], HEX);
     Serial.print(ub.bytes[0], HEX);
     Serial.print(", Data: ");
-    Serial.print(extract_packet(packet));
+    Serial.print(data);
     Serial.print(", Success: ");
     Serial.println(success);
 }

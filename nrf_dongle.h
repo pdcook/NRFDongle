@@ -49,12 +49,6 @@
 // https://github.com/pfeerick/elapsedMillis
 #include <elapsedMillis.h>
 
-// A packet is a struct with a const generic uint8_t size array of uint8_t's
-template <uint8_t packet_size> struct Packet {
-    bool ping;
-    uint8_t data[packet_size];
-};
-
 // pairing address, CANNOT be 0
 // only 40 bits are used, as addresses are only 5 bytes
 const uint64_t _PAIR_ADDRESS_ = 1;
@@ -62,18 +56,20 @@ const uint64_t _PAIR_ADDRESS_ = 1;
 // pairing channel
 const uint8_t _PAIR_CHANNEL_ = 0;
 
-// pairing packet, sends the unique_id and ping millis
-typedef Packet<sizeof(uint64_t) + sizeof(uint32_t)> PairingPacket;
-
-union PairingPacketUnion {
-    PairingPacket packet;
-    struct {
-        uint64_t unique_id;
-        uint16_t ping_interval_millis;
-    };
+// Packet, wraps TData with a ping flag
+template <typename TData> struct Packet {
+    TData data;
+    bool ping = false;
 };
 
-template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
+// Pairing Packet, contains the unique_id of the host
+// and the ping interval in milliseconds
+struct PairingPacket {
+    uint64_t unique_id;
+    uint16_t ping_interval_millis;
+};
+
+template <typename TData, uint8_t max_packets> class NRFDongle {
     public:
         // take in a reference to the radio, a unique identifier for this radio
         // the ping interval in milliseconds,
@@ -110,13 +106,13 @@ template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
         Radio &get_radio();
 
         #ifdef NRF_HOST
-            bool send(Packet<packet_size> packet, bool send_now = false);
+            bool send(TData data, bool send_now = false);
 
             bool ping();
         #endif // NRF_HOST
 
         #ifdef NRF_DONGLE
-            bool read(Packet<packet_size> &packet, bool pop = true);
+            bool read(TData &data, bool pop = true);
         #endif // NRF_DONGLE
 
     private:
@@ -130,20 +126,19 @@ template <uint8_t packet_size, uint8_t max_packets> class NRFDongle {
         uint8_t power_level;
         uint8_t retry_delay;
         uint8_t retry_count;
-        CircularBuffer<Packet<packet_size>, max_packets> buffer;
+        CircularBuffer<TData, max_packets> buffer;
         elapsedMillis ping_timer;
         elapsedMillis pair_timer;
         uint16_t ping_interval_millis;
         uint32_t pair_timeout_millis;
 
         bool try_pair();
-        uint8_t get_ping_packet_size();
 };
 
 // Implementation
 
 // Constructor
-template <uint8_t packet_size, uint8_t max_packets> NRFDongle<packet_size, max_packets>::NRFDongle(Radio &radio, uint64_t unique_id, uint16_t ping_interval_millis, uint32_t pair_timeout_millis, uint8_t data_rate, uint8_t power_level, uint8_t retry_delay, uint8_t retry_count) : radio(radio) {
+template <typename TData, uint8_t max_packets> NRFDongle<TData, max_packets>::NRFDongle(Radio &radio, uint64_t unique_id, uint16_t ping_interval_millis, uint32_t pair_timeout_millis, uint8_t data_rate, uint8_t power_level, uint8_t retry_delay, uint8_t retry_count) : radio(radio) {
 
     // US law restricts the use of the 2.4 GHz band
     // specifically, frequencies between 2.4-2.473 GHz
@@ -193,7 +188,7 @@ template <uint8_t packet_size, uint8_t max_packets> NRFDongle<packet_size, max_p
 }
 
 // Begin
-template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, max_packets>::begin() {
+template <typename TData, uint8_t max_packets> void NRFDongle<TData, max_packets>::begin() {
 
     if (!this->enabled){
         this->enabled = true;
@@ -241,7 +236,7 @@ template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, 
 }
 
 // Update
-template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, max_packets>::update() {
+template <typename TData, uint8_t max_packets> void NRFDongle<TData, max_packets>::update() {
 
     if (!this->enabled){
         return;
@@ -312,13 +307,13 @@ template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, 
             // if we have a packet
 
             // create a packet
-            Packet<packet_size> packet;
+            Packet<TData> packet;
             // read the packet
-            this->radio.read(&packet, sizeof(Packet<packet_size>));
+            this->radio.read(&packet, sizeof(Packet<TData>));
 
             // push the packet if it is not a ping packet
             if (!packet.ping) {
-                this->buffer.push(packet);
+                this->buffer.push(packet.data);
             }
 
             // if we have successfully received a packet
@@ -329,7 +324,7 @@ template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, 
 }
 
 // End
-template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, max_packets>::end() {
+template <typename TData, uint8_t max_packets> void NRFDongle<TData, max_packets>::end() {
     if (this->enabled){
         this->enabled = false;
         this->radio.powerDown();
@@ -337,7 +332,7 @@ template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, 
 }
 
 // Unpair
-template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, max_packets>::unpair() {
+template <typename TData, uint8_t max_packets> bool NRFDongle<TData, max_packets>::unpair() {
     if (!this->enabled){
         return false;
     }
@@ -382,47 +377,47 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
 }
 
 // Is Paired
-template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, max_packets>::is_paired() {
+template <typename TData, uint8_t max_packets> bool NRFDongle<TData, max_packets>::is_paired() {
     return this->paired;
 }
 
 // Is Enabled
-template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, max_packets>::is_enabled() {
+template <typename TData, uint8_t max_packets> bool NRFDongle<TData, max_packets>::is_enabled() {
     return this->enabled;
 }
 
 // Get Address
-template <uint8_t packet_size, uint8_t max_packets> uint64_t NRFDongle<packet_size, max_packets>::get_address() {
+template <typename TData, uint8_t max_packets> uint64_t NRFDongle<TData, max_packets>::get_address() {
     return this->address;
 }
 
 // Get Unique ID
-template <uint8_t packet_size, uint8_t max_packets> uint64_t NRFDongle<packet_size, max_packets>::get_unique_id() {
+template <typename TData, uint8_t max_packets> uint64_t NRFDongle<TData, max_packets>::get_unique_id() {
     return this->unique_id;
 }
 
 // Get Channel
-template <uint8_t packet_size, uint8_t max_packets> uint8_t NRFDongle<packet_size, max_packets>::get_channel() {
+template <typename TData, uint8_t max_packets> uint8_t NRFDongle<TData, max_packets>::get_channel() {
     return this->channel;
 }
 
 // Set Unique ID
-template <uint8_t packet_size, uint8_t max_packets> void NRFDongle<packet_size, max_packets>::set_unique_id(uint64_t unique_id) {
+template <typename TData, uint8_t max_packets> void NRFDongle<TData, max_packets>::set_unique_id(uint64_t unique_id) {
     this->unique_id = unique_id;
 }
 
 // Has Data
-template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, max_packets>::has_data() {
+template <typename TData, uint8_t max_packets> bool NRFDongle<TData, max_packets>::has_data() {
     return !this->buffer.isEmpty();
 }
 
 // Get Radio
-template <uint8_t packet_size, uint8_t max_packets> Radio &NRFDongle<packet_size, max_packets>::get_radio() {
+template <typename TData, uint8_t max_packets> Radio &NRFDongle<TData, max_packets>::get_radio() {
     return this->radio;
 }
 
 // Try Pair
-template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, max_packets>::try_pair() {
+template <typename TData, uint8_t max_packets> bool NRFDongle<TData, max_packets>::try_pair() {
 
     if (!this->enabled){
         return false;
@@ -437,11 +432,11 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
     #ifdef NRF_HOST
 
         // create a pairing packet
-        PairingPacketUnion pairing_packet;
+        PairingPacket pairing_packet;
         pairing_packet.unique_id = this->unique_id;
         pairing_packet.ping_interval_millis = this->ping_interval_millis;
 
-        bool report = this->radio.write(&pairing_packet.packet, sizeof(PairingPacket));
+        bool report = this->radio.write(&pairing_packet, sizeof(PairingPacket));
 
         // if the message was received, we are paired
         // and we need to switch our channel, address,
@@ -456,7 +451,7 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
 
             this->radio.setChannel(this->channel);
             this->radio.openWritingPipe(this->address);
-            this->radio.setPayloadSize(sizeof(Packet<packet_size>));
+            this->radio.setPayloadSize(sizeof(Packet<TData>));
             this->radio.stopListening();
         }
         return report;
@@ -470,8 +465,8 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
             // check if the size is the size of the pairing packet
             if (size == sizeof(PairingPacket)) {
                 // read the packet
-                PairingPacketUnion pairing_packet;
-                this->radio.read(&pairing_packet.packet, sizeof(PairingPacket));
+                PairingPacket pairing_packet;
+                this->radio.read(&pairing_packet, sizeof(PairingPacket));
                 uint64_t unique_id = pairing_packet.unique_id;
                 uint16_t ping_interval_millis = pairing_packet.ping_interval_millis;
                 this->address = unique_id;
@@ -480,7 +475,7 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
                 this->radio.setChannel(this->channel);
                 this->ping_interval_millis = ping_interval_millis;
                 this->radio.openReadingPipe(1, this->address);
-                this->radio.setPayloadSize(sizeof(Packet<packet_size>));
+                this->radio.setPayloadSize(sizeof(Packet<TData>));
                 this->radio.startListening();
                 this->paired = true;
                 this->pair_timer = 0;
@@ -494,7 +489,7 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
 
 // Send
 #ifdef NRF_HOST
-    template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, max_packets>::send(Packet<packet_size> packet, bool send_now) {
+    template <typename TData, uint8_t max_packets> bool NRFDongle<TData, max_packets>::send(TData data, bool send_now) {
         if (!this->enabled){
             return false;
         }
@@ -505,12 +500,14 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
 
         // if we are not sending now, push the packet
         if (!send_now) {
-            this->buffer.push(packet);
+            this->buffer.push(data);
             return true;
         }
 
         // if we are sending now, send the packet
-        bool report = this->radio.write(&packet, sizeof(Packet<packet_size>));
+        Packet<TData> packet;
+        packet.data = data;
+        bool report = this->radio.write(&packet, sizeof(Packet<TData>));
 
         // if the packet was received, reset the ping timer
         if (report) {
@@ -523,7 +520,7 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
 
 // Ping
 #ifdef NRF_HOST
-    template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, max_packets>::ping() {
+    template <typename TData, uint8_t max_packets> bool NRFDongle<TData, max_packets>::ping() {
         // returns true if ping was sent and acknowledged
         // or if there is no need to ping
         // returns false if the ping was sent but not acknowledged
@@ -542,11 +539,11 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
 
             // create a ping packet
 
-            Packet<packet_size> ping_packet;
+            Packet<TData> ping_packet;
             ping_packet.ping = true;
 
 
-            bool report = this->radio.write(&ping_packet, sizeof(Packet<packet_size>));
+            bool report = this->radio.write(&ping_packet, sizeof(Packet<TData>));
 
             return report;
         }
@@ -557,7 +554,7 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
 
 // Read
 #ifdef NRF_DONGLE
-    template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, max_packets>::read(Packet<packet_size> &packet, bool pop) {
+    template <typename TData, uint8_t max_packets> bool NRFDongle<TData, max_packets>::read(TData &data, bool pop) {
         if (!this->enabled){
             return false;
         }
@@ -571,9 +568,9 @@ template <uint8_t packet_size, uint8_t max_packets> bool NRFDongle<packet_size, 
         }
 
         if (pop) {
-            packet = this->buffer.pop();
+            data = this->buffer.pop();
         } else {
-            packet = this->buffer.last();
+            data = this->buffer.last();
         }
 
         return true;
