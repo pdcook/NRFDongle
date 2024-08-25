@@ -31,6 +31,10 @@
     uint8_t power_level = RF24_PA_HIGH;
 #endif // NRF24
 
+uint64_t program_id = 0; // program id must match on both host and dongle
+// the program id ensures that only hosts and dongles set up to
+// work together will pair
+
 uint32_t pair_timeout_millis = 120000; // 2 minutes
 uint16_t ping_interval_millis = 2000; // 2 seconds
 uint8_t retry_delay = 5; // delay is (x + 1) * 250us, default is 1.5ms
@@ -46,6 +50,7 @@ float data = 0.0;
 // create a dongle object by providing
 // the radio object
 // a unique device id
+// the program id
 // the ping interval in milliseconds
 // the pair timeout in milliseconds
 // the data rate
@@ -58,7 +63,7 @@ float data = 0.0;
 // the channel will be determined by the device id
 
 // for this example, the data is a float, with a buffer of 2 elements
-NRFDongle<float, 2> dongle(radio, device_id, ping_interval_millis, pair_timeout_millis, data_rate, power_level, retry_delay, retry_count);
+NRFDongle<float, 2> dongle(radio, device_id, program_id, ping_interval_millis, pair_timeout_millis, data_rate, power_level, retry_delay, retry_count);
 
 // union for converting between uint64_t and two uint32_t
 // since Arduino's Serial.print does not support printing uint64_t

@@ -16,19 +16,19 @@
 // throw a compile error
 
 #if !defined(NRF_HOST) && !defined(NRF_DONGLE)
-    #error "Either NRF_HOST or NRF_DONGLE must be defined"
+    #error "Either NRF_HOST or NRF_DONGLE must be defined before including nrf_dongle.h"
 #endif
 
 #if !defined(NRF24) && !defined(NRF52)
-    #error "Either NRF24 or NRF52 must be defined"
+    #error "Either NRF24 or NRF52 must be defined before including nrf_dongle.h"
 #endif
 
 #if defined(NRF_HOST) && defined(NRF_DONGLE)
-    #error "Only one of NRF_HOST or NRF_DONGLE can be defined"
+    #error "Only one of NRF_HOST or NRF_DONGLE can be defined before including nrf_dongle.h"
 #endif
 
 #if defined(NRF24) && defined(NRF52)
-    #error "Only one of NRF24 or NRF52 can be defined"
+    #error "Only one of NRF24 or NRF52 can be defined before including nrf_dongle.h"
 #endif
 
 #ifdef NRF24
@@ -62,10 +62,12 @@ template <typename TData> struct Packet {
     bool ping = false;
 };
 
-// Pairing Packet, contains the unique_id of the host
+// Pairing Packet, contains the unique_id of the host,
+// the program_id, which must match the program_id of the dongle,
 // and the ping interval in milliseconds
 struct PairingPacket {
     uint64_t unique_id;
+    uint64_t program_id;
     uint16_t ping_interval_millis;
 };
 
@@ -81,6 +83,7 @@ template <typename TData, uint8_t max_packets> class NRFDongle {
         NRFDongle(
                     Radio &radio,
                     uint64_t unique_id, // unused for dongle
+                    uint64_t program_id, // host and dongle must match
                     uint16_t ping_interval_millis, // unused for dongle
                     uint32_t pair_timeout_millis,
                     uint8_t data_rate,
@@ -98,6 +101,7 @@ template <typename TData, uint8_t max_packets> class NRFDongle {
         uint64_t get_address();
         uint64_t get_unique_id();
         uint8_t get_channel();
+        uint64_t get_program_id();
         void set_unique_id(uint64_t unique_id);
 
         // method for whether or not there is data in the buffer
@@ -121,6 +125,7 @@ template <typename TData, uint8_t max_packets> class NRFDongle {
         bool paired = false;
         uint64_t address;
         uint64_t unique_id;
+        uint64_t program_id;
         uint8_t channel;
         uint8_t data_rate;
         uint8_t power_level;
@@ -138,7 +143,7 @@ template <typename TData, uint8_t max_packets> class NRFDongle {
 // Implementation
 
 // Constructor
-template <typename TData, uint8_t max_packets> NRFDongle<TData, max_packets>::NRFDongle(Radio &radio, uint64_t unique_id, uint16_t ping_interval_millis, uint32_t pair_timeout_millis, uint8_t data_rate, uint8_t power_level, uint8_t retry_delay, uint8_t retry_count) : radio(radio) {
+template <typename TData, uint8_t max_packets> NRFDongle<TData, max_packets>::NRFDongle(Radio &radio, uint64_t unique_id, uint64_t program_id, uint16_t ping_interval_millis, uint32_t pair_timeout_millis, uint8_t data_rate, uint8_t power_level, uint8_t retry_delay, uint8_t retry_count) : radio(radio) {
 
     // US law restricts the use of the 2.4 GHz band
     // specifically, frequencies between 2.4-2.473 GHz
@@ -170,6 +175,9 @@ template <typename TData, uint8_t max_packets> NRFDongle<TData, max_packets>::NR
 
     // set the unique_id, which will be used later
     this->unique_id = unique_id;
+
+    // set the program_id, which must match the program_id of the host
+    this->program_id = program_id;
 
     // set the channel to the pairing channel
     this->channel = _PAIR_CHANNEL_;
@@ -396,6 +404,11 @@ template <typename TData, uint8_t max_packets> uint64_t NRFDongle<TData, max_pac
     return this->unique_id;
 }
 
+// Get Program ID
+template <typename TData, uint8_t max_packets> uint64_t NRFDongle<TData, max_packets>::get_program_id() {
+    return this->program_id;
+}
+
 // Get Channel
 template <typename TData, uint8_t max_packets> uint8_t NRFDongle<TData, max_packets>::get_channel() {
     return this->channel;
@@ -434,6 +447,7 @@ template <typename TData, uint8_t max_packets> bool NRFDongle<TData, max_packets
         // create a pairing packet
         PairingPacket pairing_packet;
         pairing_packet.unique_id = this->unique_id;
+        pairing_packet.program_id = this->program_id;
         pairing_packet.ping_interval_millis = this->ping_interval_millis;
 
         bool report = this->radio.write(&pairing_packet, sizeof(PairingPacket));
@@ -467,6 +481,12 @@ template <typename TData, uint8_t max_packets> bool NRFDongle<TData, max_packets
                 // read the packet
                 PairingPacket pairing_packet;
                 this->radio.read(&pairing_packet, sizeof(PairingPacket));
+
+                // check if the program_id matches
+                if (pairing_packet.program_id != this->program_id) {
+                    return false;
+                }
+
                 uint64_t unique_id = pairing_packet.unique_id;
                 uint16_t ping_interval_millis = pairing_packet.ping_interval_millis;
                 this->address = unique_id;
