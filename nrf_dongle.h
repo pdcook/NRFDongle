@@ -32,6 +32,7 @@
 #endif
 
 #ifdef NRF24
+    #include <SPI.h>
     // https://github.com/nRF24/RF24
     #include <RF24.h>
     typedef RF24 Radio;
@@ -80,17 +81,37 @@ template <typename TData, uint8_t max_packets> class NRFDongle {
         //     data rate, power level,
         //     retry delay (x+1)*250us [x = 0-15]
         //     number of retries [0-15]
-        NRFDongle(
-                    Radio &radio,
-                    uint64_t unique_id, // unused for dongle
-                    uint64_t program_id, // host and dongle must match
-                    uint16_t ping_interval_millis, // unused for dongle
-                    uint32_t pair_timeout_millis,
-                    uint8_t data_rate,
-                    uint8_t power_level,
-                    uint8_t retry_delay = 5, // (5+1)*250us = 1.5ms
-                    uint8_t retry_count = 15
-                );
+        #ifdef NRF24
+            NRFDongle(
+                        Radio &radio,
+                        uint64_t unique_id, // unused for dongle
+                        uint64_t program_id, // host and dongle must match
+                        uint16_t ping_interval_millis, // unused for dongle
+                        uint32_t pair_timeout_millis,
+                        uint8_t data_rate,
+                        uint8_t power_level,
+                        uint8_t retry_delay = 5, // (5+1)*250us = 1.5ms
+                        uint8_t retry_count = 15,
+                        uint8_t ce_pin = 29,
+                        uint8_t csn_pin = 5,
+                        uint8_t rx_pin = 4,
+                        uint8_t sck_pin = 2,
+                        uint8_t tx_pin = 3
+                    );
+        #endif // NRF24
+        #ifdef NRF52
+            NRFDongle(
+                        Radio &radio,
+                        uint64_t unique_id, // unused for dongle
+                        uint64_t program_id, // host and dongle must match
+                        uint16_t ping_interval_millis, // unused for dongle
+                        uint32_t pair_timeout_millis,
+                        uint8_t data_rate,
+                        uint8_t power_level,
+                        uint8_t retry_delay = 5, // (5+1)*250us = 1.5ms
+                        uint8_t retry_count = 15
+                    );
+        #endif // NRF52
 
         void begin();
         void update();
@@ -137,13 +158,30 @@ template <typename TData, uint8_t max_packets> class NRFDongle {
         uint16_t ping_interval_millis;
         uint32_t pair_timeout_millis;
 
+        #ifdef NRF24
+            uint8_t ce_pin;
+            uint8_t csn_pin;
+            uint8_t rx_pin;
+            uint8_t sck_pin;
+            uint8_t tx_pin;
+        #endif // NRF24
+
         bool try_pair();
 };
 
 // Implementation
 
 // Constructor
-template <typename TData, uint8_t max_packets> NRFDongle<TData, max_packets>::NRFDongle(Radio &radio, uint64_t unique_id, uint64_t program_id, uint16_t ping_interval_millis, uint32_t pair_timeout_millis, uint8_t data_rate, uint8_t power_level, uint8_t retry_delay, uint8_t retry_count) : radio(radio) {
+template <typename TData, uint8_t max_packets> NRFDongle<TData, max_packets>::NRFDongle(Radio &radio, uint64_t unique_id, uint64_t program_id, uint16_t ping_interval_millis, uint32_t pair_timeout_millis, uint8_t data_rate, uint8_t power_level, uint8_t retry_delay, uint8_t retry_count
+    #ifdef NRF24
+        ,
+        uint8_t ce_pin,
+        uint8_t csn_pin,
+        uint8_t rx_pin,
+        uint8_t sck_pin,
+        uint8_t tx_pin
+    #endif // NRF24
+        ) : radio(radio) {
 
     // US law restricts the use of the 2.4 GHz band
     // specifically, frequencies between 2.4-2.473 GHz
@@ -193,6 +231,14 @@ template <typename TData, uint8_t max_packets> NRFDongle<TData, max_packets>::NR
     this->power_level = power_level;
     this->retry_delay = retry_delay;
     this->retry_count = retry_count;
+
+    #ifdef NRF24
+        this->ce_pin = ce_pin;
+        this->csn_pin = csn_pin;
+        this->rx_pin = rx_pin;
+        this->sck_pin = sck_pin;
+        this->tx_pin = tx_pin;
+    #endif // NRF24
 }
 
 // Begin
@@ -203,7 +249,19 @@ template <typename TData, uint8_t max_packets> void NRFDongle<TData, max_packets
         this->radio.powerUp();
     }
 
-    this->radio.begin();
+    #ifdef NRF24
+        SPI.setRX(this->rx_pin);
+        SPI.setTX(this->tx_pin);
+        SPI.setSCK(this->sck_pin);
+        SPI.setCS(this->csn_pin);
+        SPI.begin(true);
+
+        this->radio.begin(&SPI, this->ce_pin, this->csn_pin);
+    #endif // NRF24
+
+    #ifdef NRF52
+        this->radio.begin();
+    #endif // NRF52
 
     this->channel = _PAIR_CHANNEL_;
     this->address = _PAIR_ADDRESS_;
@@ -213,8 +271,14 @@ template <typename TData, uint8_t max_packets> void NRFDongle<TData, max_packets
     this->radio.setChannel(channel);
 
     // apply settings
-    this->radio.setDataRate(this->data_rate);
-    this->radio.setPALevel(this->power_level);
+    #ifdef NRF24
+        this->radio.setDataRate((rf24_datarate_e)this->data_rate);
+        this->radio.setPALevel((rf24_pa_dbm_e)this->power_level);
+    #endif // NRF24
+    #ifdef NRF52
+        this->radio.setDataRate(this->data_rate);
+        this->radio.setPALevel(this->power_level);
+    #endif // NRF52
     this->radio.setRetries(this->retry_delay, this->retry_count);
 
     // set transmission size to the size of the pairing packet during pairing
